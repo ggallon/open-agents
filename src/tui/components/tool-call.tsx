@@ -3,6 +3,12 @@ import { Box, Text } from "ink";
 import type { TUIAgentUIToolPart } from "../types";
 import { getToolName } from "ai";
 
+type DiffLine = {
+  type: "context" | "addition" | "removal" | "separator";
+  lineNumber?: number;
+  content: string;
+};
+
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 function ToolSpinner() {
@@ -62,6 +68,190 @@ function ToolLayout({
   );
 }
 
+function FileChangeLayout({
+  action,
+  filePath,
+  additions,
+  removals,
+  lines,
+  error,
+  running,
+}: {
+  action: "Create" | "Update";
+  filePath: string;
+  additions: number;
+  removals: number;
+  lines: DiffLine[];
+  error?: string;
+  running: boolean;
+}) {
+  const dotColor = running ? "yellow" : error ? "red" : "green";
+  const maxWidth = 80;
+
+  return (
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+      {/* Header: ● Update(src/tui/lib/markdown.ts) */}
+      <Box>
+        {running ? <ToolSpinner /> : <Text color={dotColor}>● </Text>}
+        <Text bold color={running ? "yellow" : "white"}>
+          {action}
+        </Text>
+        <Text color="gray">(</Text>
+        <Text color="cyan">{filePath}</Text>
+        <Text color="gray">)</Text>
+      </Box>
+
+      {/* Subheader: └ Updated src/file.ts with X additions and Y removals */}
+      {!running && !error && (
+        <Box paddingLeft={2}>
+          <Text color="gray">└ </Text>
+          <Text>
+            {action === "Create" ? "Created" : "Updated"}{" "}
+          </Text>
+          <Text bold>{filePath}</Text>
+          <Text> with </Text>
+          <Text color="green">{additions} addition{additions !== 1 ? "s" : ""}</Text>
+          <Text> and </Text>
+          <Text color="red">{removals} removal{removals !== 1 ? "s" : ""}</Text>
+        </Box>
+      )}
+
+      {/* Diff lines */}
+      {!running && !error && lines.length > 0 && (
+        <Box flexDirection="column" paddingLeft={4}>
+          {lines.map((line, i) => (
+            <Box key={i}>
+              {line.type === "separator" ? (
+                <Text color="gray">{line.content}</Text>
+              ) : (
+                <>
+                  {/* Line number */}
+                  <Text color="gray">
+                    {line.lineNumber !== undefined
+                      ? String(line.lineNumber).padStart(4, " ")
+                      : "    "}{" "}
+                  </Text>
+
+                  {/* +/- indicator and content */}
+                  {line.type === "addition" ? (
+                    <>
+                      <Text backgroundColor="#234823">+ </Text>
+                      <Text backgroundColor="#234823">
+                        {line.content.slice(0, maxWidth)}
+                      </Text>
+                    </>
+                  ) : line.type === "removal" ? (
+                    <>
+                      <Text backgroundColor="#5c2626">- </Text>
+                      <Text backgroundColor="#5c2626">
+                        {line.content.slice(0, maxWidth)}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text color="gray">  </Text>
+                      <Text>{line.content.slice(0, maxWidth)}</Text>
+                    </>
+                  )}
+                </>
+              )}
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {error && (
+        <Box paddingLeft={2}>
+          <Text color="gray">└ </Text>
+          <Text color="red">Error: {error.slice(0, 80)}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function createWriteDiffLines(content: string, maxLines: number = 10): DiffLine[] {
+  const contentLines = content.split("\n");
+  const result: DiffLine[] = [];
+
+  if (contentLines.length <= maxLines) {
+    contentLines.forEach((line, i) => {
+      result.push({ type: "addition", lineNumber: i + 1, content: line });
+    });
+  } else {
+    // Show first few and last few lines with separator
+    const showStart = Math.floor(maxLines / 2);
+    const showEnd = maxLines - showStart;
+
+    for (let i = 0; i < showStart; i++) {
+      const line = contentLines[i];
+      if (line !== undefined) {
+        result.push({ type: "addition", lineNumber: i + 1, content: line });
+      }
+    }
+
+    result.push({ type: "separator", content: "..." });
+
+    for (let i = contentLines.length - showEnd; i < contentLines.length; i++) {
+      const line = contentLines[i];
+      if (line !== undefined) {
+        result.push({ type: "addition", lineNumber: i + 1, content: line });
+      }
+    }
+  }
+
+  return result;
+}
+
+function createEditDiffLines(
+  oldString: string,
+  newString: string,
+  contextLines: number = 2,
+  maxLines: number = 15
+): { lines: DiffLine[]; additions: number; removals: number } {
+  const oldLines = oldString.split("\n");
+  const newLines = newString.split("\n");
+  const result: DiffLine[] = [];
+
+  // Simple diff: show context, removals, then additions
+  // For now, show the old lines as removals and new lines as additions with context
+
+  // Count additions and removals
+  const removals = oldLines.length;
+  const additions = newLines.length;
+
+  // Build diff with context
+  const allLines: DiffLine[] = [];
+
+  // Add context before (if we had it - for now just show the change)
+  oldLines.forEach((line, i) => {
+    allLines.push({ type: "removal", lineNumber: i + 1, content: line });
+  });
+
+  newLines.forEach((line, i) => {
+    allLines.push({ type: "addition", lineNumber: i + 1, content: line });
+  });
+
+  // Limit total lines
+  if (allLines.length <= maxLines) {
+    return { lines: allLines, additions, removals };
+  }
+
+  // Show first portion and last portion with separator
+  const half = Math.floor(maxLines / 2);
+  for (let i = 0; i < half; i++) {
+    const line = allLines[i];
+    if (line) result.push(line);
+  }
+  result.push({ type: "separator", content: "..." });
+  for (let i = allLines.length - half; i < allLines.length; i++) {
+    const line = allLines[i];
+    if (line) result.push(line);
+  }
+
+  return { lines: result, additions, removals };
+}
+
 export function ToolCall({ part }: { part: TUIAgentUIToolPart }) {
   const running =
     part.state === "input-streaming" || part.state === "input-available";
@@ -85,15 +275,17 @@ export function ToolCall({ part }: { part: TUIAgentUIToolPart }) {
 
     case "tool-write": {
       const filePath = part.input?.filePath ?? "...";
+      const content = part.input?.content ?? "";
+      const lines = createWriteDiffLines(content);
+      const additions = content ? content.split("\n").length : 0;
+
       return (
-        <ToolLayout
-          name="Write"
-          summary={filePath}
-          output={
-            part.state === "output-available" && (
-              <Text color="white">File written</Text>
-            )
-          }
+        <FileChangeLayout
+          action="Create"
+          filePath={filePath}
+          additions={additions}
+          removals={0}
+          lines={running ? [] : lines}
           error={error}
           running={running}
         />
@@ -102,15 +294,17 @@ export function ToolCall({ part }: { part: TUIAgentUIToolPart }) {
 
     case "tool-edit": {
       const filePath = part.input?.filePath ?? "...";
+      const oldString = part.input?.oldString ?? "";
+      const newString = part.input?.newString ?? "";
+      const { lines, additions, removals } = createEditDiffLines(oldString, newString);
+
       return (
-        <ToolLayout
-          name="Edit"
-          summary={filePath}
-          output={
-            part.state === "output-available" && (
-              <Text color="white">File updated</Text>
-            )
-          }
+        <FileChangeLayout
+          action="Update"
+          filePath={filePath}
+          additions={additions}
+          removals={removals}
+          lines={running ? [] : lines}
           error={error}
           running={running}
         />
