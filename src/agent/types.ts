@@ -35,4 +35,31 @@ export interface AgentContext {
   mode: AgentMode;
 }
 
+/**
+ * Approval rules for auto-approving tool operations within a session.
+ * Rules are matched against tool arguments to skip manual approval.
+ *
+ * Note: Rules only apply to paths within the working directory.
+ * Outside-cwd operations always require explicit approval regardless of rules.
+ */
+export const approvalRuleSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("command-prefix"),
+    tool: z.literal("bash"),
+    prefix: z.string().min(1, "Prefix cannot be empty"),
+  }),
+  z.object({
+    type: z.literal("path-glob"),
+    tool: z.enum(["write", "edit", "grep", "glob"]),
+    glob: z.string(),
+  }),
+  z.object({
+    type: z.literal("subagent-type"),
+    tool: z.literal("task"),
+    subagentType: z.enum(["explorer", "executor"]),
+  }),
+]);
+
+export type ApprovalRule = z.infer<typeof approvalRuleSchema>;
+
 export const EVICTION_THRESHOLD_BYTES = 80 * 1024;

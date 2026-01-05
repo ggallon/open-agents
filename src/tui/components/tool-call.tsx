@@ -3,7 +3,8 @@ import { Box, Text, useInput } from "ink";
 import { useChat } from "@ai-sdk/react";
 import { getToolName, isTextUIPart, isToolUIPart } from "ai";
 import { useChatContext } from "../chat-context.js";
-import type { TUIAgentUIToolPart } from "../types.js";
+import type { TUIAgentUIToolPart, ApprovalRule } from "../types.js";
+import * as path from "path";
 
 export type ToolApprovalInfo = {
   toolType: string;
@@ -11,6 +12,19 @@ export type ToolApprovalInfo = {
   toolDescription?: string;
   dontAskAgainPattern?: string;
 };
+
+/**
+ * Extract command prefix for approval rules.
+ * Uses 3 tokens if second token is "run" (e.g., "bun run dev"), otherwise 2.
+ */
+function getCommandPrefix(command: string): string {
+  const tokens = command.trim().split(/\s+/);
+  const tokenCount = tokens[1] === "run" ? 3 : 2;
+  return (
+    tokens.slice(0, Math.min(tokenCount, tokens.length)).join(" ") ||
+    "this command"
+  );
+}
 
 export function getToolApprovalInfo(
   part: TUIAgentUIToolPart,
@@ -21,43 +35,53 @@ export function getToolApprovalInfo(
   switch (part.type) {
     case "tool-bash": {
       const command = String(part.input?.command ?? "");
-      // Description may be provided by Claude as additional context
       const description = (part.input as { description?: string } | undefined)
         ?.description;
-      // Extract first word of command for the pattern
-      const firstWord = command.split(" ")[0] ?? "this command";
       return {
         toolType: "Bash command",
         toolCommand: command,
         toolDescription: description,
-        dontAskAgainPattern: `${firstWord} commands in ${cwd}`,
+        dontAskAgainPattern: `${getCommandPrefix(command)} commands`,
       };
     }
 
     case "tool-write": {
       const filePath = String(part.input?.filePath ?? "");
+      // Get the directory glob pattern (matches inferApprovalRule)
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.resolve(cwd, filePath);
+      const relativePath = path.relative(cwd, absolutePath);
+      const dirPath = path.dirname(relativePath);
+      const glob = dirPath === "." ? "**" : `${dirPath}/**`;
       return {
         toolType: "Write file",
         toolCommand: filePath,
         toolDescription: "Create new file",
-        dontAskAgainPattern: `writes in ${cwd}`,
+        dontAskAgainPattern: `writes in ${glob}`,
       };
     }
 
     case "tool-edit": {
       const filePath = String(part.input?.filePath ?? "");
+      // Get the directory glob pattern (matches inferApprovalRule)
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.resolve(cwd, filePath);
+      const relativePath = path.relative(cwd, absolutePath);
+      const dirPath = path.dirname(relativePath);
+      const glob = dirPath === "." ? "**" : `${dirPath}/**`;
       return {
         toolType: "Edit file",
         toolCommand: filePath,
         toolDescription: "Modify existing file",
-        dontAskAgainPattern: `edits in ${cwd}`,
+        dontAskAgainPattern: `edits in ${glob}`,
       };
     }
 
     case "tool-task": {
       const desc = String(part.input?.task ?? "Spawning subagent");
-      const subagentType = (part.input as { subagentType?: string })
-        ?.subagentType;
+      const subagentType = part.input?.subagentType;
       return {
         toolType:
           subagentType === "executor"
@@ -82,6 +106,86 @@ export function getToolApprovalInfo(
         dontAskAgainPattern: `${toolName} operations`,
       };
     }
+  }
+}
+
+/**
+ * Infer an ApprovalRule from a tool part.
+ * Returns null if no suitable rule can be inferred.
+ */
+export function inferApprovalRule(
+  part: TUIAgentUIToolPart,
+  workingDirectory?: string,
+): ApprovalRule | null {
+  const cwd = workingDirectory ?? process.cwd();
+
+  switch (part.type) {
+    case "tool-bash": {
+      const command = String(part.input?.command ?? "").trim();
+      if (!command) return null;
+
+      return {
+        type: "command-prefix",
+        tool: "bash",
+        prefix: getCommandPrefix(command),
+      };
+    }
+
+    case "tool-write": {
+      const filePath = String(part.input?.filePath ?? "");
+      if (!filePath) return null;
+
+      // Extract directory glob pattern (e.g., "src/components/**")
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.resolve(cwd, filePath);
+      const relativePath = path.relative(cwd, absolutePath);
+      const dirPath = path.dirname(relativePath);
+
+      // Create a glob pattern for the directory
+      const glob = dirPath === "." ? "**" : `${dirPath}/**`;
+
+      return {
+        type: "path-glob",
+        tool: "write",
+        glob,
+      };
+    }
+
+    case "tool-edit": {
+      const filePath = String(part.input?.filePath ?? "");
+      if (!filePath) return null;
+
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.resolve(cwd, filePath);
+      const relativePath = path.relative(cwd, absolutePath);
+      const dirPath = path.dirname(relativePath);
+
+      const glob = dirPath === "." ? "**" : `${dirPath}/**`;
+
+      return {
+        type: "path-glob",
+        tool: "edit",
+        glob,
+      };
+    }
+
+    case "tool-task": {
+      const input = part.input;
+      const subagentType = input?.subagentType;
+      if (subagentType !== "explorer" && subagentType !== "executor")
+        return null;
+
+      return {
+        type: "subagent-type",
+        tool: "task",
+        subagentType,
+      };
+    }
+
+    default:
+      return null;
   }
 }
 
@@ -506,7 +610,8 @@ export function SubagentToolCall({
   part: Parameters<typeof getToolName>[0];
 }) {
   const toolName = getToolName(part);
-  const isRunning = part.state === "input-streaming" || part.state === "input-available";
+  const isRunning =
+    part.state === "input-streaming" || part.state === "input-available";
   const hasError = part.state === "output-error";
 
   // Extract a summary based on common tool input patterns
@@ -557,7 +662,9 @@ export function ToolCall({
 }) {
   const running =
     part.state === "input-streaming" || part.state === "input-available";
-  const approval = (part as { approval?: { id?: string; approved?: boolean; reason?: string } }).approval;
+  const approval = (
+    part as { approval?: { id?: string; approved?: boolean; reason?: string } }
+  ).approval;
   // Check for denial both via state and via approval object (for intermediate states)
   const denied = part.state === "output-denied" || approval?.approved === false;
   const denialReason = denied ? approval?.reason : undefined;
@@ -565,7 +672,8 @@ export function ToolCall({
   const error = part.state === "output-error" ? part.errorText : undefined;
   const approvalId = approvalRequested ? approval?.id : undefined;
   // Only show interactive approval buttons for the first pending approval
-  const isActiveApproval = approvalId != null && approvalId === activeApprovalId;
+  const isActiveApproval =
+    approvalId != null && approvalId === activeApprovalId;
 
   switch (part.type) {
     case "tool-read": {
@@ -707,27 +815,37 @@ export function ToolCall({
     }
 
     case "tool-todo_write": {
-      const todos = part.input?.todos as Array<{ id: string; content: string; status: string }> | undefined;
+      const todos = part.input?.todos as
+        | Array<{ id: string; content: string; status: string }>
+        | undefined;
       const todoCount = todos?.length ?? 0;
-      const completedCount = todos?.filter(t => t.status === "completed").length ?? 0;
-      const inProgressCount = todos?.filter(t => t.status === "in_progress").length ?? 0;
-      
+      const completedCount =
+        todos?.filter((t) => t.status === "completed").length ?? 0;
+      const inProgressCount =
+        todos?.filter((t) => t.status === "in_progress").length ?? 0;
+
       const getTodoIcon = (status: string) => {
         switch (status) {
-          case "completed": return "☒";
-          case "in_progress": return "◎";
-          default: return "☐";
+          case "completed":
+            return "☒";
+          case "in_progress":
+            return "◎";
+          default:
+            return "☐";
         }
       };
-      
+
       const getTodoColor = (status: string) => {
         switch (status) {
-          case "completed": return "gray";
-          case "in_progress": return "yellow";
-          default: return "white";
+          case "completed":
+            return "gray";
+          case "in_progress":
+            return "yellow";
+          default:
+            return "white";
         }
       };
-      
+
       return (
         <Box flexDirection="column">
           <ToolLayout
@@ -763,12 +881,13 @@ export function ToolCall({
 
     case "tool-task": {
       const desc = part.input?.task ?? "Spawning subagent";
-      const subagentType = (part.input as { subagentType?: string })?.subagentType;
+      const subagentType = part.input?.subagentType;
       const taskApprovalRequested = part.state === "approval-requested";
       const taskApprovalId = taskApprovalRequested
         ? (part as { approval?: { id: string } }).approval?.id
         : undefined;
-      const isTaskActiveApproval = taskApprovalId != null && taskApprovalId === activeApprovalId;
+      const isTaskActiveApproval =
+        taskApprovalId != null && taskApprovalId === activeApprovalId;
       const taskDenied = part.state === "output-denied";
       const taskDenialReason = taskDenied
         ? (part as { approval?: { reason?: string } }).approval?.reason
@@ -783,7 +902,7 @@ export function ToolCall({
       // Get all parts in order, filter to text and tool parts
       const messageParts = message?.parts ?? [];
       const relevantParts = messageParts.filter(
-        (p) => isToolUIPart(p) || isTextUIPart(p)
+        (p) => isToolUIPart(p) || isTextUIPart(p),
       );
       const toolParts = messageParts.filter(isToolUIPart);
 
@@ -795,29 +914,43 @@ export function ToolCall({
       const isComplete = hasOutput && !isPreliminary;
       const isStreaming = hasOutput && isPreliminary;
 
-      const dotColor = taskDenied 
-        ? "red" 
-        : taskApprovalRequested 
+      const dotColor = taskDenied
+        ? "red"
+        : taskApprovalRequested
           ? "yellow"
-          : isStreaming 
-            ? "yellow" 
-            : isComplete 
-              ? "green" 
+          : isStreaming
+            ? "yellow"
+            : isComplete
+              ? "green"
               : "yellow";
-      
+
       // Format subagent type for display
-      const subagentLabel = subagentType === "explorer" 
-        ? "Explorer" 
-        : subagentType === "executor" 
-          ? "Executor" 
-          : "Task";
+      const subagentLabel =
+        subagentType === "explorer"
+          ? "Explorer"
+          : subagentType === "executor"
+            ? "Executor"
+            : "Task";
 
       return (
         <Box flexDirection="column" marginTop={1} marginBottom={1}>
           {/* Header */}
           <Box>
-            {running || isStreaming ? <ToolSpinner /> : <Text color={dotColor}>● </Text>}
-            <Text bold color={taskDenied ? "red" : running || isStreaming || taskApprovalRequested ? "yellow" : "white"}>
+            {running || isStreaming ? (
+              <ToolSpinner />
+            ) : (
+              <Text color={dotColor}>● </Text>
+            )}
+            <Text
+              bold
+              color={
+                taskDenied
+                  ? "red"
+                  : running || isStreaming || taskApprovalRequested
+                    ? "yellow"
+                    : "white"
+              }
+            >
               {subagentLabel}
             </Text>
             <Text color="gray">(</Text>
@@ -829,7 +962,8 @@ export function ToolCall({
           {taskApprovalRequested && subagentType === "executor" && (
             <Box paddingLeft={2} marginTop={1}>
               <Text color="yellow">
-                This executor has full write access and can create, modify, and delete files.
+                This executor has full write access and can create, modify, and
+                delete files.
               </Text>
             </Box>
           )}
@@ -849,9 +983,7 @@ export function ToolCall({
             <Box flexDirection="column" paddingLeft={2} marginTop={1}>
               {hiddenCount > 0 && (
                 <Box marginBottom={1}>
-                  <Text color="gray">
-                    ... {hiddenCount} more above
-                  </Text>
+                  <Text color="gray">... {hiddenCount} more above</Text>
                 </Box>
               )}
               {visibleParts.map((p, i) => {
@@ -862,11 +994,14 @@ export function ToolCall({
                   // Show truncated text, dimmed
                   const text = p.text.trim();
                   if (!text) return null;
-                  const truncated = text.length > 80 ? text.slice(0, 80) + "..." : text;
+                  const truncated =
+                    text.length > 80 ? text.slice(0, 80) + "..." : text;
                   return (
                     <Box key={`text-${i}`} paddingLeft={1}>
                       <Text color="gray">│ </Text>
-                      <Text color="gray" dimColor>{truncated}</Text>
+                      <Text color="gray" dimColor>
+                        {truncated}
+                      </Text>
                     </Box>
                   );
                 }
@@ -879,7 +1014,9 @@ export function ToolCall({
           {isComplete && (
             <Box paddingLeft={2}>
               <Text color="gray">└ </Text>
-              <Text color="white">Complete ({toolParts.length} tool calls)</Text>
+              <Text color="white">
+                Complete ({toolParts.length} tool calls)
+              </Text>
             </Box>
           )}
 

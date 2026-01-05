@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
 import { useChat } from "@ai-sdk/react";
 import { useChatContext } from "../chat-context.js";
+import type { TUIAgentUIToolPart, ApprovalRule } from "../types.js";
+import { inferApprovalRule } from "./tool-call.js";
 
 export type ApprovalPanelProps = {
   approvalId: string;
@@ -9,6 +11,7 @@ export type ApprovalPanelProps = {
   toolCommand: string;
   toolDescription?: string;
   dontAskAgainPattern?: string;
+  toolPart?: TUIAgentUIToolPart;
 };
 
 export function ApprovalPanel({
@@ -17,9 +20,20 @@ export function ApprovalPanel({
   toolCommand,
   toolDescription,
   dontAskAgainPattern,
+  toolPart,
 }: ApprovalPanelProps) {
-  const { chat } = useChatContext();
+  const { chat, state, addApprovalRule } = useChatContext();
   const { addToolApprovalResponse } = useChat({ chat });
+
+  // Infer the approval rule from the tool part
+  const inferredRule = useMemo((): ApprovalRule | null => {
+    if (!toolPart) return null;
+    return inferApprovalRule(toolPart, state.workingDirectory);
+  }, [toolPart, state.workingDirectory]);
+  // Determine available options based on whether a rule can be inferred
+  const canSaveRule = inferredRule !== null;
+  const maxOption = canSaveRule ? 2 : 1; // 0=Yes, 1=Don't ask again (if available), last=reason
+
   const [selected, setSelected] = useState(0);
   const [reason, setReason] = useState("");
 
@@ -29,6 +43,11 @@ export function ApprovalPanel({
     setReason("");
   }, [approvalId]);
 
+  // Determine which "logical" option is selected based on available options
+  // When canSaveRule: 0=Yes, 1=Don't ask again, 2=Reason
+  // When !canSaveRule: 0=Yes, 1=Reason (skip "don't ask again")
+  const reasonOptionIndex = canSaveRule ? 2 : 1;
+
   useInput((input, key) => {
     // Handle escape to cancel (deny without reason)
     if (key.escape) {
@@ -36,8 +55,8 @@ export function ApprovalPanel({
       return;
     }
 
-    // When on the text input option (selected === 2)
-    if (selected === 2) {
+    // When on the text input option (reason)
+    if (selected === reasonOptionIndex) {
       if (key.return) {
         addToolApprovalResponse({
           id: approvalId,
@@ -47,7 +66,7 @@ export function ApprovalPanel({
       } else if (key.backspace || key.delete) {
         setReason((prev) => prev.slice(0, -1));
       } else if (key.upArrow || (key.ctrl && input === "p")) {
-        setSelected(1);
+        setSelected(reasonOptionIndex - 1);
       } else if (input && !key.ctrl && !key.meta && !key.return) {
         setReason((prev) => prev + input);
       }
@@ -59,17 +78,18 @@ export function ApprovalPanel({
       key.downArrow || input === "j" || (key.ctrl && input === "n");
 
     if (goUp) {
-      setSelected((prev) => (prev === 0 ? 2 : prev - 1));
+      setSelected((prev) => (prev === 0 ? reasonOptionIndex : prev - 1));
     }
     if (goDown) {
-      setSelected((prev) => (prev === 2 ? 0 : prev + 1));
+      setSelected((prev) => (prev === reasonOptionIndex ? 0 : prev + 1));
     }
     if (key.return) {
       if (selected === 0) {
         // Yes
         addToolApprovalResponse({ id: approvalId, approved: true });
-      } else if (selected === 1) {
-        // Yes, and don't ask again (placeholder - behaves as Yes for now)
+      } else if (canSaveRule && selected === 1) {
+        // Yes, and don't ask again - add the rule then approve
+        addApprovalRule(inferredRule!);
         addToolApprovalResponse({ id: approvalId, approved: true });
       }
     }
@@ -108,27 +128,31 @@ export function ApprovalPanel({
             <Text color={selected === 0 ? "yellow" : undefined}>1. Yes</Text>
           </Text>
 
-          {/* Option 2: Yes, and don't ask again */}
-          <Text>
-            <Text color="yellow">{selected === 1 ? "› " : "  "}</Text>
-            <Text color={selected === 1 ? "yellow" : undefined}>
-              2. Yes, and don't ask again for{" "}
+          {/* Option 2: Yes, and don't ask again (only if rule can be inferred) */}
+          {canSaveRule && (
+            <Text>
+              <Text color="yellow">{selected === 1 ? "› " : "  "}</Text>
+              <Text color={selected === 1 ? "yellow" : undefined}>
+                2. Yes, and don't ask again for{" "}
+              </Text>
+              <Text color={selected === 1 ? "yellow" : undefined} bold>
+                {dontAskAgainPattern}
+              </Text>
             </Text>
-            <Text color={selected === 1 ? "yellow" : undefined} bold>
-              {dontAskAgainPattern}
-            </Text>
-          </Text>
+          )}
 
-          {/* Option 3: Inline text input */}
+          {/* Option 3 (or 2 if no rule): Inline text input */}
           <Box>
-            <Text color="yellow">{selected === 2 ? "› " : "  "}</Text>
-            <Text color={selected === 2 ? "yellow" : undefined}>3. </Text>
-            {reason || selected === 2 ? (
+            <Text color="yellow">{selected === reasonOptionIndex ? "› " : "  "}</Text>
+            <Text color={selected === reasonOptionIndex ? "yellow" : undefined}>
+              {canSaveRule ? "3" : "2"}.{" "}
+            </Text>
+            {reason || selected === reasonOptionIndex ? (
               <>
-                <Text color={selected === 2 ? "yellow" : undefined}>
+                <Text color={selected === reasonOptionIndex ? "yellow" : undefined}>
                   {reason}
                 </Text>
-                {selected === 2 && <Text color="gray">█</Text>}
+                {selected === reasonOptionIndex && <Text color="gray">█</Text>}
               </>
             ) : (
               <Text color="gray">
@@ -142,7 +166,7 @@ export function ApprovalPanel({
       {/* Footer hint */}
       <Box marginTop={1}>
         <Text color="gray">
-          {selected === 2 ? "Enter to submit, Esc to cancel" : "Esc to cancel"}
+          {selected === reasonOptionIndex ? "Enter to submit, Esc to cancel" : "Esc to cancel"}
         </Text>
       </Box>
     </Box>

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import * as path from "path";
+import * as fs from "fs";
 import { isPathWithinDirectory, getSandbox, sharedContext } from "../../utils";
 
 const readInputSchema = z.object({
@@ -22,14 +23,51 @@ const readInputSchema = z.object({
 type ReadInput = z.infer<typeof readInputSchema>;
 
 /**
+ * Resolve file path with fallback for root-like paths.
+ * If a path like "/README.md" doesn't exist, try resolving it relative to workingDirectory.
+ */
+function resolveFilePath(filePath: string, workingDirectory: string): string {
+  let absolutePath = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(workingDirectory, filePath);
+
+  // If path doesn't exist and looks like a root-relative path (e.g., /README.md),
+  // try resolving it relative to the working directory
+  try {
+    fs.accessSync(absolutePath);
+  } catch {
+    if (
+      filePath.startsWith("/") &&
+      !filePath.startsWith("/Users/") &&
+      !filePath.startsWith("/home/")
+    ) {
+      const workspaceRelativePath = path.join(workingDirectory, filePath);
+      try {
+        fs.accessSync(workspaceRelativePath);
+        absolutePath = workspaceRelativePath;
+      } catch {
+        // Neither path exists - return original
+      }
+    }
+  }
+
+  return absolutePath;
+}
+
+/**
  * Check if a read operation needs approval based on the file path.
  * Returns true if the path is outside the working directory.
  */
 function pathNeedsApproval(args: ReadInput): boolean {
-  const absolutePath = path.isAbsolute(args.filePath)
-    ? args.filePath
-    : path.resolve(sharedContext.workingDirectory, args.filePath);
-  return !isPathWithinDirectory(absolutePath, sharedContext.workingDirectory);
+  const absolutePath = resolveFilePath(args.filePath, sharedContext.workingDirectory);
+
+  // Check if within working directory - no approval needed
+  if (isPathWithinDirectory(absolutePath, sharedContext.workingDirectory)) {
+    return false;
+  }
+
+  // Outside working directory - always requires approval
+  return true;
 }
 
 export const readFileTool = () => tool({
@@ -58,34 +96,8 @@ EXAMPLES:
     const workingDirectory = sandbox.workingDirectory;
 
     try {
-      // Resolve the path relative to working directory
-      let absolutePath: string;
-      if (path.isAbsolute(filePath)) {
-        absolutePath = filePath;
-      } else {
-        absolutePath = path.resolve(workingDirectory, filePath);
-      }
-
-      // If the path doesn't exist and looks like a root-relative path (e.g., /README.md),
-      // try resolving it relative to the working directory
-      try {
-        await sandbox.access(absolutePath);
-      } catch {
-        // Path doesn't exist - check if it's a root-relative path that should be workspace-relative
-        if (
-          filePath.startsWith("/") &&
-          !filePath.startsWith("/Users/") &&
-          !filePath.startsWith("/home/")
-        ) {
-          const workspaceRelativePath = path.join(workingDirectory, filePath);
-          try {
-            await sandbox.access(workspaceRelativePath);
-            absolutePath = workspaceRelativePath;
-          } catch {
-            // Neither path exists - let it fall through to the original error handling
-          }
-        }
-      }
+      // Use the same path resolution logic as needsApproval
+      const absolutePath = resolveFilePath(filePath, workingDirectory);
 
       const stats = await sandbox.stat(absolutePath);
       if (stats.isDirectory()) {
