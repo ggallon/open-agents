@@ -6,6 +6,28 @@ import { useChatContext } from "../chat-context.js";
 import type { TUIAgentUIToolPart, ApprovalRule } from "../types.js";
 import * as path from "path";
 
+function getTodoIcon(status: string) {
+  switch (status) {
+    case "completed":
+      return "☒";
+    case "in_progress":
+      return "◎";
+    default:
+      return "☐";
+  }
+}
+
+function getTodoColor(status: string) {
+  switch (status) {
+    case "completed":
+      return "gray";
+    case "in_progress":
+      return "yellow";
+    default:
+      return "white";
+  }
+}
+
 export type ToolApprovalInfo = {
   toolType: string;
   toolCommand: string;
@@ -299,7 +321,7 @@ function ToolLayout({
   denied,
   denialReason,
   approvalRequested,
-  approvalId,
+  approvalId: _approvalId,
   isActiveApproval,
 }: {
   name: string;
@@ -327,12 +349,7 @@ function ToolLayout({
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
       <Box>
         {running ? <ToolSpinner /> : <Text color={dotColor}>● </Text>}
-        <Text
-          bold
-          color={
-            denied ? "red" : "white"
-          }
-        >
+        <Text bold color={denied ? "red" : "white"}>
           {name}
         </Text>
         <Text color="gray">(</Text>
@@ -385,7 +402,7 @@ function FileChangeLayout({
   denied,
   denialReason,
   approvalRequested,
-  approvalId,
+  approvalId: _approvalId,
   isActiveApproval,
 }: {
   action: "Create" | "Update";
@@ -684,7 +701,8 @@ export function ToolCall({
   switch (part.type) {
     case "tool-read": {
       const rawFilePath = part.input?.filePath ?? "...";
-      const filePath = rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
+      const filePath =
+        rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
       const lines =
         part.state === "output-available" ? part.output?.totalLines : undefined;
       return (
@@ -700,7 +718,8 @@ export function ToolCall({
 
     case "tool-write": {
       const rawFilePath = part.input?.filePath ?? "...";
-      const filePath = rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
+      const filePath =
+        rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
       const content = part.input?.content ?? "";
       const lines = createWriteDiffLines(content);
       const additions = content ? content.split("\n").length : 0;
@@ -731,7 +750,8 @@ export function ToolCall({
 
     case "tool-edit": {
       const rawFilePath = part.input?.filePath ?? "...";
-      const filePath = rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
+      const filePath =
+        rawFilePath === "..." ? rawFilePath : toRelativePath(rawFilePath);
       const oldString = part.input?.oldString ?? "";
       const newString = part.input?.newString ?? "";
       const { lines, additions, removals } = createEditDiffLines(
@@ -834,14 +854,7 @@ export function ToolCall({
                 ●{" "}
               </Text>
             )}
-            <Text
-              bold
-              color={
-                denied
-                  ? "red"
-                  : "white"
-              }
-            >
+            <Text bold color={denied ? "red" : "white"}>
               Bash
             </Text>
             <Text color="gray">(</Text>
@@ -934,28 +947,6 @@ export function ToolCall({
       const inProgressCount =
         todos?.filter((t) => t.status === "in_progress").length ?? 0;
 
-      const getTodoIcon = (status: string) => {
-        switch (status) {
-          case "completed":
-            return "☒";
-          case "in_progress":
-            return "◎";
-          default:
-            return "☐";
-        }
-      };
-
-      const getTodoColor = (status: string) => {
-        switch (status) {
-          case "completed":
-            return "gray";
-          case "in_progress":
-            return "yellow";
-          default:
-            return "white";
-        }
-      };
-
       return (
         <Box flexDirection="column">
           <ToolLayout
@@ -993,11 +984,6 @@ export function ToolCall({
       const desc = part.input?.task ?? "Spawning subagent";
       const subagentType = part.input?.subagentType;
       const taskApprovalRequested = part.state === "approval-requested";
-      const taskApprovalId = taskApprovalRequested
-        ? part.approval?.id
-        : undefined;
-      const isTaskActiveApproval =
-        taskApprovalId != null && taskApprovalId === activeApprovalId;
       const taskDenied = part.state === "output-denied";
       const taskDenialReason = taskDenied ? part.approval?.reason : undefined;
 
@@ -1049,14 +1035,7 @@ export function ToolCall({
             ) : (
               <Text color={dotColor}>● </Text>
             )}
-            <Text
-              bold
-              color={
-                taskDenied
-                  ? "red"
-                  : "white"
-              }
-            >
+            <Text bold color={taskDenied ? "red" : "white"}>
               {subagentLabel}
             </Text>
             <Text color="gray">(</Text>

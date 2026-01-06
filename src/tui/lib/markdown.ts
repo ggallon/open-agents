@@ -7,6 +7,10 @@ chalk.level = 3;
 
 const marked = new Marked({ async: false });
 
+function pad(text: string, width: number) {
+  return text.padEnd(width);
+}
+
 marked.use({
   renderer: {
     code({ text, lang }: Tokens.Code): string {
@@ -113,11 +117,10 @@ marked.use({
           const text = this.parser.parseInline(cell.tokens).trim();
           colWidths[i] = Math.max(colWidths[i] ?? 0, text.length);
           return text;
-        })
+        }),
       );
 
       // Build the table
-      const pad = (text: string, width: number) => text.padEnd(width);
       const separator = colWidths.map((w) => "─".repeat(w + 2)).join("┼");
 
       // Header row
@@ -127,7 +130,7 @@ marked.use({
 
       // Body rows
       const bodyRows = rowTexts.map((row) =>
-        row.map((text, i) => ` ${pad(text, colWidths[i] ?? 0)} `).join("│")
+        row.map((text, i) => ` ${pad(text, colWidths[i] ?? 0)} `).join("│"),
       );
 
       return (
