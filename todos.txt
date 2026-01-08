@@ -28,6 +28,7 @@
 - [ ] add some kind of check for editing tools blocking if it hasn't been read first!  (cc claude code)
 - [x] update action / command ui to be white when pending (not orange)
 - [ ] explore a tool registry that uses provider defined tools when available...
+- [ ] explore tool registry (server-side) that switches to provider-defined tools when available
 
 ---
 
