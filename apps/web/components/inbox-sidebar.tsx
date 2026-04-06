@@ -3,7 +3,6 @@
 import {
   Archive,
   ChevronDown,
-  ExternalLink,
   FolderGit2,
   GitBranch,
   GitMerge,
@@ -160,19 +159,29 @@ function getSessionStatusIcon(session: SessionWithUnread) {
   return <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />;
 }
 
-function getSessionStatusLabel(session: SessionWithUnread): string {
-  if (session.hasStreaming) return "Working";
-  if (session.prNumber && session.prStatus === "merged") return "Merged";
-  if (session.prNumber && session.prStatus === "open") return "Open PR";
-  if (session.prNumber && session.prStatus === "closed") return "Closed";
+function getSessionStatusLabel(session: SessionWithUnread): {
+  text: string;
+  prNumber: number | null;
+} {
+  if (session.hasStreaming) return { text: "Working", prNumber: null };
+  if (session.prNumber && session.prStatus === "merged")
+    return { text: `PR #${session.prNumber}`, prNumber: session.prNumber };
+  if (session.prNumber && session.prStatus === "open")
+    return { text: `PR #${session.prNumber}`, prNumber: session.prNumber };
+  if (session.prNumber && session.prStatus === "closed")
+    return { text: `PR #${session.prNumber}`, prNumber: session.prNumber };
   const hasDiff = session.linesAdded || session.linesRemoved;
-  if (session.branch && hasDiff) return "Needs attention";
-  if (session.branch) return "New session";
-  if (session.status === "running") return "Setting up";
-  if (session.status === "completed") return "Completed";
-  if (session.status === "failed") return "Failed";
-  if (session.status === "archived") return "Archived";
-  return "Idle";
+  if (session.branch && hasDiff)
+    return { text: "Needs attention", prNumber: null };
+  if (session.branch) return { text: "New session", prNumber: null };
+  if (session.status === "running")
+    return { text: "Setting up", prNumber: null };
+  if (session.status === "completed")
+    return { text: "Completed", prNumber: null };
+  if (session.status === "failed") return { text: "Failed", prNumber: null };
+  if (session.status === "archived")
+    return { text: "Archived", prNumber: null };
+  return { text: "Idle", prNumber: null };
 }
 
 function getSessionBranchUrl(session: SessionWithUnread): string | null {
@@ -192,7 +201,7 @@ function SessionPopoverContent({ session }: { session: SessionWithUnread }) {
   const branchUrl = getSessionBranchUrl(session);
   const prUrl = getSessionPrUrl(session);
   const hasDiff = session.linesAdded !== null || session.linesRemoved !== null;
-  const hasSecondRow = hasDiff || prUrl;
+  const statusLabel = getSessionStatusLabel(session);
 
   return (
     <div className="space-y-2">
@@ -204,7 +213,18 @@ function SessionPopoverContent({ session }: { session: SessionWithUnread }) {
       {/* Status · branch · time — all inline, never wraps */}
       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
         <span className="shrink-0">{getSessionStatusIcon(session)}</span>
-        <span className="shrink-0">{getSessionStatusLabel(session)}</span>
+        {prUrl && statusLabel.prNumber ? (
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="shrink-0 hover:text-foreground transition-colors"
+          >
+            {statusLabel.text}
+          </a>
+        ) : (
+          <span className="shrink-0">{statusLabel.text}</span>
+        )}
         {session.branch ? (
           <>
             <span className="shrink-0 text-muted-foreground/40">·</span>
@@ -228,27 +248,13 @@ function SessionPopoverContent({ session }: { session: SessionWithUnread }) {
         <span className="shrink-0">{lastActivityLabel}</span>
       </div>
 
-      {/* Diff count · PR link — all inline */}
-      {hasSecondRow ? (
+      {/* Diff stats */}
+      {hasDiff ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {hasDiff ? (
-            <DiffStats
-              added={session.linesAdded}
-              removed={session.linesRemoved}
-            />
-          ) : null}
-          {prUrl ? (
-            <a
-              href={prUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 hover:text-foreground transition-colors"
-            >
-              <GitPullRequest className="h-3 w-3" />
-              <span>#{session.prNumber}</span>
-              <ExternalLink className="h-2.5 w-2.5" />
-            </a>
-          ) : null}
+          <DiffStats
+            added={session.linesAdded}
+            removed={session.linesRemoved}
+          />
         </div>
       ) : null}
     </div>
