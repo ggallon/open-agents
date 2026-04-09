@@ -1216,7 +1216,12 @@ export function GitPanel(props: GitPanelProps) {
       </div>
 
       {/* Panel content */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        className={cn(
+          "min-h-0 flex-1",
+          gitPanelTab === "diff" ? "flex flex-col" : "overflow-y-auto",
+        )}
+      >
         {gitPanelTab === "code" && (
           <div className="p-2">
             <div className="space-y-1">
@@ -1294,97 +1299,104 @@ export function GitPanel(props: GitPanelProps) {
         )}
 
         {gitPanelTab === "diff" && (
-          <div className="p-2">
-            {/* Inline commit UI */}
-            {hasRepo && (
-              <div className="mb-2">
-                <InlineCommitPanel
-                  session={session}
-                  hasSandbox={hasSandbox}
-                  gitStatus={gitStatus}
-                  refreshGitStatus={refreshGitStatus}
-                  onCommitted={onCommitted}
-                />
-              </div>
-            )}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {/* Fixed commit area */}
+            <div className="shrink-0 p-2 pb-0">
+              {hasRepo && (
+                <div className="mb-2">
+                  <InlineCommitPanel
+                    session={session}
+                    hasSandbox={hasSandbox}
+                    gitStatus={gitStatus}
+                    refreshGitStatus={refreshGitStatus}
+                    onCommitted={onCommitted}
+                  />
+                </div>
+              )}
 
-            {/* Separator */}
-            {hasRepo && diffFiles && diffFiles.length > 0 && (
-              <div className="mb-2 border-t border-border" />
-            )}
+              {/* Separator */}
+              {hasRepo && diffFiles && diffFiles.length > 0 && (
+                <div className="mb-2 border-t border-border" />
+              )}
 
-            {/* Scope toggle */}
-            {diffFiles && diffFiles.length > 0 && (
-              <div className="mb-2 flex items-center gap-1 px-1">
-                <button
-                  type="button"
-                  onClick={() => setDiffScope("uncommitted")}
-                  className={cn(
-                    "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
-                    diffScope === "uncommitted"
-                      ? "bg-secondary text-secondary-foreground"
-                      : "text-muted-foreground hover:bg-muted/50",
-                  )}
-                >
-                  Uncommitted
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDiffScope("branch")}
-                  className={cn(
-                    "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
-                    diffScope === "branch"
-                      ? "bg-secondary text-secondary-foreground"
-                      : "text-muted-foreground hover:bg-muted/50",
-                  )}
-                >
-                  All Changes
-                </button>
-              </div>
-            )}
-
-            {diffFiles && diffFiles.length > 0 ? (
-              <>
-                {hasDiffChanges &&
-                  (() => {
-                    const visibleFiles =
+              {/* Scope toggle */}
+              {diffFiles && diffFiles.length > 0 && (
+                <div className="mb-2 flex items-center gap-1 px-1">
+                  <button
+                    type="button"
+                    onClick={() => setDiffScope("uncommitted")}
+                    className={cn(
+                      "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
+                      diffScope === "uncommitted"
+                        ? "bg-secondary text-secondary-foreground"
+                        : "text-muted-foreground hover:bg-muted/50",
+                    )}
+                  >
+                    Uncommitted
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDiffScope("branch")}
+                    className={cn(
+                      "rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
                       diffScope === "branch"
-                        ? diffFiles
-                        : diffFiles.filter(isUncommittedFile);
-                    const adds = visibleFiles.reduce(
-                      (sum, f) => sum + f.additions,
-                      0,
-                    );
-                    const dels = visibleFiles.reduce(
-                      (sum, f) => sum + f.deletions,
-                      0,
-                    );
-                    return (
-                      <div className="mb-2 flex items-center gap-2 px-2 text-xs text-muted-foreground">
-                        <span>
-                          {visibleFiles.length} file
-                          {visibleFiles.length !== 1 ? "s" : ""} changed
+                        ? "bg-secondary text-secondary-foreground"
+                        : "text-muted-foreground hover:bg-muted/50",
+                    )}
+                  >
+                    All Changes
+                  </button>
+                </div>
+              )}
+
+              {/* File summary */}
+              {diffFiles &&
+                diffFiles.length > 0 &&
+                hasDiffChanges &&
+                (() => {
+                  const visibleFiles =
+                    diffScope === "branch"
+                      ? diffFiles
+                      : diffFiles.filter(isUncommittedFile);
+                  const adds = visibleFiles.reduce(
+                    (sum, f) => sum + f.additions,
+                    0,
+                  );
+                  const dels = visibleFiles.reduce(
+                    (sum, f) => sum + f.deletions,
+                    0,
+                  );
+                  return (
+                    <div className="mb-2 flex items-center gap-2 px-2 text-xs text-muted-foreground">
+                      <span>
+                        {visibleFiles.length} file
+                        {visibleFiles.length !== 1 ? "s" : ""} changed
+                      </span>
+                      {adds > 0 && (
+                        <span className="text-green-600 dark:text-green-500">
+                          +{adds}
                         </span>
-                        {adds > 0 && (
-                          <span className="text-green-600 dark:text-green-500">
-                            +{adds}
-                          </span>
-                        )}
-                        {dels > 0 && (
-                          <span className="text-red-600 dark:text-red-400">
-                            -{dels}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })()}
+                      )}
+                      {dels > 0 && (
+                        <span className="text-red-600 dark:text-red-400">
+                          -{dels}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+            </div>
+
+            {/* Scrollable file list */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {diffFiles && diffFiles.length > 0 ? (
                 <DiffFileList files={diffFiles} />
-              </>
-            ) : (
-              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                {hasDiff ? "Loading..." : "No file changes yet"}
-              </div>
-            )}
+              ) : (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  {hasDiff ? "Loading..." : "No file changes yet"}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
