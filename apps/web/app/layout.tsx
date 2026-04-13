@@ -52,8 +52,7 @@ export const metadata: Metadata = {
     default: "Open Agents",
     template: "%s | Open Agents",
   },
-  description:
-    "Spawn coding agents that run infinitely in the cloud. Powered by AI SDK, Gateway, Sandbox, and Workflow SDK.",
+  description: "Spawn coding agents that run infinitely in the cloud.",
   icons: {
     icon: faviconPath,
     shortcut: faviconPath,
