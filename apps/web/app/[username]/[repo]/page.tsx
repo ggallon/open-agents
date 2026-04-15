@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { headers as nextHeaders } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
   createSessionWithInitialChat,
@@ -6,7 +7,8 @@ import {
 } from "@/lib/db/sessions";
 import { getVercelProjectLinkByRepo } from "@/lib/db/vercel-project-links";
 import { getUserPreferences } from "@/lib/db/user-preferences";
-import { getRepoToken } from "@/lib/github/get-repo-token";
+import { getUserGitHubToken } from "@/lib/github/user-token";
+import { sanitizeUserPreferencesForSession } from "@/lib/model-access";
 import { getRandomCityName } from "@/lib/random-city";
 import { getServerSession } from "@/lib/session/get-server-session";
 
@@ -65,8 +67,8 @@ export default async function RepoPage({ params }: RepoPageProps) {
   );
 
   // Get a GitHub token (if available) for private repo access
-  const token = await getRepoToken(session.user.id, username)
-    .then((result) => result.token)
+  const token = await getUserGitHubToken(session.user.id)
+    .then((value) => value ?? undefined)
     .catch(() => {
       // No token available -- will try unauthenticated (works for public repos)
       return undefined;
@@ -85,10 +87,16 @@ export default async function RepoPage({ params }: RepoPageProps) {
   }
 
   // Use the user's preferred sandbox type and model
-  const [preferences, savedVercelProject] = await Promise.all([
+  const requestHost = (await nextHeaders()).get("host") ?? "";
+  const [rawPreferences, savedVercelProject] = await Promise.all([
     preferencesPromise,
     savedVercelProjectPromise,
   ]);
+  const preferences = sanitizeUserPreferencesForSession(
+    rawPreferences,
+    session,
+    requestHost,
+  );
 
   const cloneUrl = `https://github.com/${username}/${repo}.git`;
 
